@@ -52,11 +52,14 @@ def indir(url):
             with urllib.request.urlopen(istek, timeout=60) as yanit:
                 return yanit.read().decode("utf-8-sig", errors="replace")
         except urllib.error.HTTPError as e:
+            print(f"  ! {url} -> HTTP {e.code} (deneme {deneme + 1})", flush=True)
             if e.code == 404:
                 return None
-            time.sleep(15 * (deneme + 1))
-        except Exception:
-            time.sleep(15 * (deneme + 1))
+            time.sleep(30 * (deneme + 1))
+        except Exception as e:
+            print(f"  ! {url} -> {e} (deneme {deneme + 1})", flush=True)
+            time.sleep(30 * (deneme + 1))
+    print(f"  X {url} indirilemedi", flush=True)
     return None
 
 
@@ -157,7 +160,7 @@ def main():
         for y in [bas - i for i in range(max(SEZON_SAYISI, ANALIZ_SEZON))]:
             kod = f"{y % 100:02d}{(y + 1) % 100:02d}"
             metin = indir(f"{TEMEL}/mmz4281/{kod}/{div}.csv")
-            time.sleep(3)
+            time.sleep(5)
             if metin is None:
                 if y not in sezonlar:
                     continue
@@ -167,6 +170,8 @@ def main():
                 continue
             liste = [m for m in satirlar(metin) if m["fh"] is not None]
             liste.sort(key=lambda m: (m["t"], m["saat"]))
+            oranli = sum(1 for m in liste if oran(m["ham"].get("PSH")) and oran(m["ham"].get("PSCH")))
+            print(f"{div} {etiket(y)}: {len(liste)} maç, {oranli} maçta ilk+kapanış oranı", flush=True)
             if bas - y < ANALIZ_SEZON:
                 for m in liste:
                     analize_ekle([analiz["TUM"], analiz[div]], m)
@@ -224,6 +229,8 @@ def main():
     eski_oran = eski.get("oran")
     if eski_oran and toplam(oran_bolumu["veri"]) < 0.8 * toplam(eski_oran.get("veri")):
         oran_bolumu = eski_oran  # bu sefer indirmeler eksik kaldı, eski analizi koru
+        print("Uyarı: indirmeler eksik, önceki oran analizi korundu", flush=True)
+    print(f"Oran analizine giren toplam seçim: {toplam(oran_bolumu['veri'])}", flush=True)
 
     veri = {
         "oran": oran_bolumu,
