@@ -29,6 +29,18 @@ EK_LIGLER = {
     "SWE": ("Sweden", "İsveç Allsvenskan"),
 }
 SEZON_SAYISI = 4  # bu sezon + önceki 3 sezon
+ANALIZ_SEZON = 5  # oran hareketi analizinde kullanılan sezon sayısı (ana ligler)
+
+# Oran hareketi: Pinnacle ilk oran -> kapanış oranı değişimine göre gruplar
+KOVALAR = [("≤ -%15", -9, -0.15), ("-%15 / -%5", -0.15, -0.05), ("±%5", -0.05, 0.05),
+           ("+%5 / +%15", 0.05, 0.15), ("≥ +%15", 0.15, 9)]
+SECIMLER = {
+    "MS 1": ("PSH", "PSCH", "B365CH", lambda h, a: h > a),
+    "MS X": ("PSD", "PSCD", "B365CD", lambda h, a: h == a),
+    "MS 2": ("PSA", "PSCA", "B365CA", lambda h, a: h < a),
+    "2.5 Üst": ("P>2.5", "PC>2.5", "B365C>2.5", lambda h, a: h + a > 2),
+    "2.5 Alt": ("P<2.5", "PC<2.5", "B365C<2.5", lambda h, a: h + a < 3),
+}
 TEMEL = "https://www.football-data.co.uk"
 CIKTI = "data.json"
 
@@ -66,6 +78,39 @@ def sayi(s):
         return None
 
 
+def oran(s):
+    try:
+        v = float(s)
+        return v if v > 1 else None
+    except Exception:
+        return None
+
+
+def bos_analiz():
+    return {sec: [[0, 0, 0.0, 0.0, 0.0, 0.0, 0] for _ in KOVALAR] for sec in SECIMLER}
+
+
+def analize_ekle(hedefler, m):
+    r = m["ham"]
+    for sec, (ilk_s, kap_s, b_s, tuttu_mu) in SECIMLER.items():
+        ilk, kap, b365 = oran(r.get(ilk_s)), oran(r.get(kap_s)), oran(r.get(b_s))
+        if not ilk or not kap:
+            continue
+        hareket = kap / ilk - 1
+        i = next(j for j, (_, a, b) in enumerate(KOVALAR) if a <= hareket < b)
+        tuttu = tuttu_mu(m["fh"], m["fa"])
+        for hedef in hedefler:
+            k = hedef[sec][i]
+            k[0] += 1
+            k[1] += 1 if tuttu else 0
+            k[2] += 1 / kap
+            k[3] += (ilk - 1) if tuttu else -1
+            k[4] += (kap - 1) if tuttu else -1
+            if b365:
+                k[5] += (b365 - 1) if tuttu else -1
+                k[6] += 1
+
+
 def satirlar(metin):
     sonuc = []
     for r in csv.DictReader(io.StringIO(metin)):
@@ -83,6 +128,7 @@ def satirlar(metin):
             "ev": ev, "dep": dep,
             "fh": sayi(r.get("FTHG") or r.get("HG")), "fa": sayi(r.get("FTAG") or r.get("AG")),
             "hh": sayi(r.get("HTHG")), "ha": sayi(r.get("HTAG")),
+            "ham": r,
         })
     return sonuc
 
@@ -99,6 +145,7 @@ def main():
     bugun = datetime.date.today()
     bas = bugun.year if bugun.month >= 7 else bugun.year - 1
     sezonlar = [bas - i for i in range(SEZON_SAYISI)]
+    analiz = {"TUM": bos_analiz()}
     etiket = lambda y: f"{y}/{(y + 1) % 100:02d}"
 
     satir = lambda m: [m["t"], m["saat"], m["ev"], m["dep"], m["fh"], m["fa"], m["hh"], m["ha"]]
@@ -106,18 +153,25 @@ def main():
     for div in LIGLER:
         maclar[div] = {}
         sezon_listesi[div] = [etiket(y) for y in sezonlar]
-        for y in sezonlar:
+        analiz[div] = bos_analiz()
+        for y in [bas - i for i in range(max(SEZON_SAYISI, ANALIZ_SEZON))]:
             kod = f"{y % 100:02d}{(y + 1) % 100:02d}"
             metin = indir(f"{TEMEL}/mmz4281/{kod}/{div}.csv")
             time.sleep(3)
             if metin is None:
+                if y not in sezonlar:
+                    continue
                 onceki = eski.get("maclar", {}).get(div, {}).get(etiket(y))
                 if onceki:
                     maclar[div][etiket(y)] = onceki
                 continue
             liste = [m for m in satirlar(metin) if m["fh"] is not None]
             liste.sort(key=lambda m: (m["t"], m["saat"]))
-            maclar[div][etiket(y)] = [satir(m) for m in liste]
+            if bas - y < ANALIZ_SEZON:
+                for m in liste:
+                    analize_ekle([analiz["TUM"], analiz[div]], m)
+            if y in sezonlar:
+                maclar[div][etiket(y)] = [satir(m) for m in liste]
 
     for div, (ulke, _) in EK_LIGLER.items():
         metin = indir(f"{TEMEL}/new/{div}.csv")
@@ -157,7 +211,22 @@ def main():
         fikstur += [f for f in eski.get("fikstur", []) if f[0] in EK_LIGLER]
     fikstur.sort(key=lambda x: (x[1], x[2]))
 
+    def yuvarla(a):
+        return {d: {s: [[k[0], k[1], round(k[2], 2), round(k[3], 2), round(k[4], 2), round(k[5], 2), k[6]]
+                        for k in v] for s, v in x.items()} for d, x in a.items()}
+    toplam = lambda a: sum(k[0] for v in (a or {}).get("TUM", {}).values() for k in v)
+    oran_bolumu = {
+        "kovalar": [k[0] for k in KOVALAR],
+        "secimler": list(SECIMLER),
+        "sezonlar": [etiket(bas - i) for i in range(ANALIZ_SEZON)],
+        "veri": yuvarla(analiz),
+    }
+    eski_oran = eski.get("oran")
+    if eski_oran and toplam(oran_bolumu["veri"]) < 0.8 * toplam(eski_oran.get("veri")):
+        oran_bolumu = eski_oran  # bu sefer indirmeler eksik kaldı, eski analizi koru
+
     veri = {
+        "oran": oran_bolumu,
         "guncelleme": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%MZ"),
         "ligler": {**LIGLER, **{k: v[1] for k, v in EK_LIGLER.items()}},
         "sezonlar": sezon_listesi,
