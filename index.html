@@ -73,34 +73,39 @@ main{max-width:720px;margin:0 auto;padding:12px 12px 40px}
   const tr=t=>t.split('-').reverse().join('.');
   const $=id=>document.getElementById(id);
   const app=$('app');
-  let D=null, sekme='gel', arama='';
+  let D=null, sekme='gel', arama='', ligSec='';
 
   const bugun=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
   const gunEkle=(t,n)=>{const d=new Date(t+'T12:00:00');d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
   const gunAdi=t=>new Date(t+'T12:00:00').toLocaleDateString('tr-TR',{weekday:'long',day:'numeric',month:'long'});
 
+  const sez=div=>D.sezonlar[div]||[];
   const takimMaclari=(div,sez,tk)=>((D.maclar[div]||{})[sez]||[]).filter(r=>r[2]===tk||r[3]===tk);
 
   function sira(div,tk,t,ev,dep,oynandi){
-    const l=takimMaclari(div,D.sezonlar[0],tk);
+    const l=takimMaclari(div,sez(div)[0],tk);
     if(oynandi){const i=l.findIndex(r=>r[0]===t&&r[2]===ev&&r[3]===dep);return i+1}
     return l.filter(r=>r[0]<t).length+1;
   }
 
   function listeler(){
     if(sekme==='gel'){
-      return D.fikstur.map(f=>({div:f[0],t:f[1],saat:f[2],ev:f[3],dep:f[4]}));
+      const sira=Object.keys(D.ligler);
+      return D.fikstur.map(f=>({div:f[0],t:f[1],saat:f[2],ev:f[3],dep:f[4]}))
+        .sort((a,b)=>a.t.localeCompare(b.t)||sira.indexOf(a.div)-sira.indexOf(b.div)||a.saat.localeCompare(b.saat));
     }
     const sinir=gunEkle(bugun(),-7), out=[];
-    for(const div in D.maclar){const l=(D.maclar[div][D.sezonlar[0]]||[]);
+    for(const div in D.maclar){const l=(D.maclar[div][sez(div)[0]]||[]);
       l.forEach(r=>{if(r[0]>=sinir)out.push({div,t:r[0],saat:r[1],ev:r[2],dep:r[3],r})});}
-    return out.sort((a,b)=>(b.t+b.saat).localeCompare(a.t+a.saat));
+    const sira=Object.keys(D.ligler);
+    return out.sort((a,b)=>b.t.localeCompare(a.t)||sira.indexOf(a.div)-sira.indexOf(b.div)||a.saat.localeCompare(b.saat));
   }
 
   function listeGoster(){
     const q=arama.toLocaleLowerCase('tr');
-    const l=listeler().filter(m=>!q||ad(m.ev).toLocaleLowerCase('tr').includes(q)||ad(m.dep).toLocaleLowerCase('tr').includes(q));
-    let h='<input class="search" id="ara" placeholder="Takım ara" value="'+esc(arama)+'">';
+    const l=listeler().filter(m=>!ligSec||m.div===ligSec).filter(m=>!q||ad(m.ev).toLocaleLowerCase('tr').includes(q)||ad(m.dep).toLocaleLowerCase('tr').includes(q));
+    let h='<input class="search" id="ara" placeholder="Takım ara" value="'+esc(arama)+'"><select class="search" id="lig"><option value="">Tüm ligler</option>'+
+      Object.entries(D.ligler).map(([k,v])=>'<option value="'+k+'"'+(k===ligSec?' selected':'')+'>'+esc(v)+'</option>').join('')+'</select>';
     if(!l.length)h+='<p class="empty">'+(sekme==='gel'?'Yaklaşan maç bulunamadı.':'Son 7 günde oynanan maç yok.')+'</p>';
     let gun='',lig='';
     l.forEach((m,i)=>{
@@ -113,6 +118,7 @@ main{max-width:720px;margin:0 auto;padding:12px 12px 40px}
     h+='<p class="foot">Son güncelleme: '+esc(D.guncelleme.replace('T',' ').replace('Z',' UTC'))+'</p>';
     app.innerHTML=h;
     const a=$('ara');a.addEventListener('input',e=>{arama=e.target.value;const p=a.selectionStart;listeGoster();const n=$('ara');n.focus();n.setSelectionRange(p,p)});
+    $('lig').onchange=e=>{ligSec=e.target.value;listeGoster()};
     app.querySelectorAll('.match').forEach(b=>b.onclick=()=>{location.hash='m='+b.dataset.k});
   }
 
@@ -121,7 +127,7 @@ main{max-width:720px;margin:0 auto;padding:12px 12px 40px}
   function takimBlok(div,tk,n,rol){
     let h='<div class="team"><div class="th"><h3>'+esc(ad(tk))+'</h3><small>'+rol+' · '+n+'. maç</small></div>';
     const ok=[];
-    D.sezonlar.slice(1).forEach(s=>{
+    sez(div).slice(1).forEach(s=>{
       const l=takimMaclari(div,s,tk);
       if(!l.length){h+='<div class="row"><span class="season">'+s+'</span><span class="none">Bu ligde yoktu</span></div>';return}
       const r=l[n-1];
@@ -135,14 +141,14 @@ main{max-width:720px;margin:0 auto;padding:12px 12px 40px}
       const n2=ok.length, c=f=>ok.filter(f).length;
       h+='<div class="stats"><div>G-B-M <b>'+c(o=>o.res==='G')+'-'+c(o=>o.res==='B')+'-'+c(o=>o.res==='M')+'</b></div>'+
         '<div>2.5 üst <b>'+c(o=>o.r[4]+o.r[5]>2)+'/'+n2+'</b></div><div>KG var <b>'+c(o=>o.r[4]>0&&o.r[5]>0)+'/'+n2+'</b></div>'+
-        '<div>İY önde <b>'+c(o=>o.r[6]!=null&&(o.ic?o.r[6]>o.r[7]:o.r[7]>o.r[6]))+'/'+n2+'</b></div></div>';
+        (ok.some(o=>o.r[6]!=null)?'<div>İY önde <b>'+c(o=>o.r[6]!=null&&(o.ic?o.r[6]>o.r[7]:o.r[7]>o.r[6]))+'/'+c(o=>o.r[6]!=null)+'</b></div>':'<div>İY verisi yok</div>')+'</div>';
     }
     return h+'</div>';
   }
 
   function detayGoster(k){
     const [div,t,ev,dep]=decodeURIComponent(k).split('|');
-    const r=((D.maclar[div]||{})[D.sezonlar[0]]||[]).find(x=>x[0]===t&&x[2]===ev&&x[3]===dep);
+    const r=((D.maclar[div]||{})[sez(div)[0]]||[]).find(x=>x[0]===t&&x[2]===ev&&x[3]===dep);
     const n1=sira(div,ev,t,ev,dep,!!r), n2=sira(div,dep,t,ev,dep,!!r);
     let h='<button class="back" id="geri">‹ Maçlar</button><div class="hero"><h2>'+esc(ad(ev))+' – '+esc(ad(dep))+'</h2><p>'+esc(D.ligler[div]||div)+' · '+tr(t)+'</p>';
     if(r)h+='<div class="tiles" style="margin-top:8px"><span class="tile"><i>İY</i><b>'+sk(r[6],r[7])+'</b></span><span class="tile"><i>MS</i><b>'+sk(r[4],r[5])+'</b></span></div>';
